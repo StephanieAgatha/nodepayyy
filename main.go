@@ -128,10 +128,21 @@ func setupClient(proxy string) *fasthttp.Client {
 	}
 
 	if proxy != "" {
-		if !strings.HasPrefix(proxy, "socks5://") {
-			proxy = "socks5://" + proxy
+		switch {
+		case strings.HasPrefix(proxy, "http://"):
+			client.Dial = fasthttpproxy.FasthttpHTTPDialer(proxy)
+		case strings.HasPrefix(proxy, "socks5://"):
+			client.Dial = fasthttpproxy.FasthttpSocksDialer(proxy)
+		default:
+			// user:pass@host:port format
+			if strings.Contains(proxy, "@") {
+				proxy = "socks5://" + proxy
+			} else {
+				// host:port format
+				proxy = "socks5://" + proxy
+			}
+			client.Dial = fasthttpproxy.FasthttpSocksDialer(proxy)
 		}
-		client.Dial = fasthttpproxy.FasthttpSocksDialer(proxy)
 	}
 
 	client.TLSConfig = &tls.Config{
