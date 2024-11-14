@@ -292,7 +292,7 @@ func readLines(filename string) ([]string, error) {
 func main() {
 	config := Config{
 		SessionURL: "http://18.136.143.169/api/auth/session",
-		PingURL:    "https://52.77.10.116/api/network/ping",
+		PingURL:    "https://13.215.134.222/api/network/ping",
 		IPCheckURL: "https://ipinfo.io/json",
 	}
 
