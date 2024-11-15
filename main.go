@@ -223,7 +223,7 @@ func sendPing(client *fasthttp.Client, config Config, token string, accountInfo 
 	return client.DoTimeout(req, resp, 30*time.Second)
 }
 
-func connectAndPing(ctx context.Context, program *tea.Program, config Config, proxy, token string) {
+func connectAndPing(ctx context.Context, program *tea.Program, config Config, proxy, token string, proxyList []string) {
 	client := setupClient(proxy)
 
 	capturedIP, err := getProxyIP(client, program, config)
@@ -262,6 +262,15 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			now := time.Now().UTC()
+			if now.Hour() == 0 && now.Minute() == 5 {
+				program.Send(StatusMsg{status: "It's time to do daily claim..."})
+				if err := dailyClaim(client, token, proxyList, program); err != nil {
+					program.Send(StatusMsg{status: "Daily claim failed", err: err})
+				}
+				time.Sleep(5 * time.Second)
+			}
+
 			if err := sendPing(client, config, token, *accountInfo); err != nil {
 				program.Send(StatusMsg{status: "Ping failed", err: err})
 				continue
@@ -271,6 +280,76 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 			})
 		}
 	}
+}
+
+// daily claim
+func dailyClaim(client *fasthttp.Client, token string, proxyList []string, program *tea.Program) error {
+	for _, proxy := range proxyList {
+		proxyClient := setupClient(proxy)
+
+		ip, err := getProxyIP(proxyClient, program, Config{IPCheckURL: "https://ipinfo.io/json"})
+		if err != nil {
+			continue
+		}
+
+		program.Send(StatusMsg{status: fmt.Sprintf("Checking daily claim with IP: %s", ip)})
+
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		defer fasthttp.ReleaseRequest(req)
+		defer fasthttp.ReleaseResponse(resp)
+
+		req.SetRequestURI("https://api.nodepay.ai/api/mission/complete-mission")
+		req.Header.SetMethod("POST")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36")
+
+		payload := map[string]string{
+			"mission_id": "1",
+		}
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		req.SetBody(payloadBytes)
+
+		if err := proxyClient.DoTimeout(req, resp, 30*time.Second); err != nil {
+			program.Send(StatusMsg{status: fmt.Sprintf("Failed claim with IP %s (Status: %d), trying next proxy...", ip, resp.StatusCode())})
+			continue
+		}
+
+		var response struct {
+			Success bool   `json:"success"`
+			Code    int    `json:"code"`
+			Msg     string `json:"msg"`
+			Data    struct {
+				UserID       string  `json:"user_id"`
+				EarnedPoints float64 `json:"earned_points"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(resp.Body(), &response); err != nil {
+			continue
+		}
+
+		if response.Success {
+			return nil
+		}
+
+		if !response.Success && response.Code == 400 && response.Msg == "Mission not available" {
+			accountInfo, _ := getSession(proxyClient, token, Config{SessionURL: "http://18.136.143.169/api/auth/session"})
+			if accountInfo != nil && accountInfo.Name != "" {
+				return fmt.Errorf("%s already daily claimed", accountInfo.Name)
+			}
+			return fmt.Errorf("daily mission already claimed")
+		}
+
+		program.Send(StatusMsg{status: fmt.Sprintf("Failed claim with IP %s (Status: %d), trying next proxy...", ip, resp.StatusCode())})
+	}
+
+	return fmt.Errorf("failed to claim with all proxies")
 }
 
 func readLines(filename string) ([]string, error) {
@@ -345,10 +424,10 @@ func main() {
 	for token, proxyList := range tokenProxies {
 		for _, proxy := range proxyList {
 			wg.Add(1)
-			go func(t, proxy string) {
+			go func(t, proxy string, pList []string) {
 				defer wg.Done()
-				connectAndPing(ctx, p, config, proxy, t)
-			}(token, proxy)
+				connectAndPing(ctx, p, config, proxy, t, pList)
+			}(token, proxy, tokenProxies[token])
 		}
 	}
 
