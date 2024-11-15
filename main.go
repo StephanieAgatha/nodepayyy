@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	browser "github.com/itzngga/fake-useragent"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpproxy"
 	"os"
@@ -200,13 +201,14 @@ func generateBrowserID(token string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))[:16]
 }
 
-func sendPing(client *fasthttp.Client, config Config, token string, accountInfo AccountInfo) error {
+func sendPing(client *fasthttp.Client, config Config, token string, accountInfo AccountInfo, userAgent string) error {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	req.SetRequestURI(config.PingURL)
 	req.Header.SetMethod("POST")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	pingData := map[string]interface{}{
 		"id":         accountInfo.UID,
@@ -226,6 +228,7 @@ func sendPing(client *fasthttp.Client, config Config, token string, accountInfo 
 
 func connectAndPing(ctx context.Context, program *tea.Program, config Config, proxy, token string, proxyList []string) {
 	client := setupClient(proxy)
+	macUA := browser.MacOSX() //random mac ua
 
 	capturedIP, err := getProxyIP(client, program, config)
 	if err != nil {
@@ -252,7 +255,7 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 
 	if _, checked := checkedTokens.LoadOrStore(token, true); !checked {
 		program.Send(StatusMsg{status: "Checking daily claim..."})
-		if err := dailyClaim(client, token, proxyList, program); err != nil {
+		if err := dailyClaim(client, token, proxyList, program, macUA); err != nil {
 			if strings.Contains(err.Error(), "already daily claimed") {
 				program.Send(StatusMsg{status: fmt.Sprintf("%s already daily claimed, skipping to next account or start to sent ping", accountInfo.Name)})
 			} else {
@@ -280,13 +283,13 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 			now := time.Now().UTC()
 			if now.Hour() == 0 && now.Minute() == 5 {
 				program.Send(StatusMsg{status: "It's time to do daily claim..."})
-				if err := dailyClaim(client, token, proxyList, program); err != nil {
+				if err := dailyClaim(client, token, proxyList, program, macUA); err != nil {
 					program.Send(StatusMsg{status: "Daily claim failed", err: err})
 				}
 				time.Sleep(5 * time.Second)
 			}
 
-			if err := sendPing(client, config, token, *accountInfo); err != nil {
+			if err := sendPing(client, config, token, *accountInfo, macUA); err != nil {
 				program.Send(StatusMsg{status: "Ping failed", err: err})
 				continue
 			}
@@ -298,7 +301,8 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 }
 
 // daily claim
-func dailyClaim(client *fasthttp.Client, token string, proxyList []string, program *tea.Program) error {
+func dailyClaim(client *fasthttp.Client, token string, proxyList []string, program *tea.Program, userAgent string) error {
+	//gen random ua
 	for _, proxy := range proxyList {
 		proxyClient := setupClient(proxy)
 
@@ -319,7 +323,7 @@ func dailyClaim(client *fasthttp.Client, token string, proxyList []string, progr
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "*/*")
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36")
+		req.Header.Set("User-Agent", userAgent)
 
 		payload := map[string]string{
 			"mission_id": "1",
