@@ -26,7 +26,8 @@ var (
 	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("161"))
 	//infoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
-	appStyle = lipgloss.NewStyle().Margin(1, 2, 0, 2)
+	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
+	checkedTokens = sync.Map{}
 )
 
 type Config struct {
@@ -247,6 +248,20 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 			accountInfo.BrowserID = generateBrowserID(token)
 		}
 		program.Send(StatusMsg{status: fmt.Sprintf("Session established for %s", accountInfo.Name)})
+	}
+
+	if _, checked := checkedTokens.LoadOrStore(token, true); !checked {
+		program.Send(StatusMsg{status: "Checking daily claim..."})
+		if err := dailyClaim(client, token, proxyList, program); err != nil {
+			if strings.Contains(err.Error(), "already daily claimed") {
+				program.Send(StatusMsg{status: fmt.Sprintf("%s already daily claimed, skipping to next account or start to sent ping", accountInfo.Name)})
+			} else {
+				program.Send(StatusMsg{status: "Daily claim failed", err: err})
+				return
+			}
+		} else {
+			program.Send(StatusMsg{status: "Daily claim success! Earned 100 points"})
+		}
 	}
 
 	browserIDDisplay := accountInfo.BrowserID
