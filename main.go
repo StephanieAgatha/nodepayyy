@@ -302,7 +302,6 @@ func connectAndPing(ctx context.Context, program *tea.Program, config Config, pr
 
 // daily claim
 func dailyClaim(client *fasthttp.Client, token string, proxyList []string, program *tea.Program, userAgent string) error {
-	//gen random ua
 	for _, proxy := range proxyList {
 		proxyClient := setupClient(proxy)
 
@@ -389,9 +388,9 @@ func readLines(filename string) ([]string, error) {
 
 func main() {
 	config := Config{
-		SessionURL: "http://18.136.143.169/api/auth/session",
-		PingURL:    "http://13.215.134.222/api/network/ping",
-		IPCheckURL: "https://ipinfo.io/json",
+		SessionURL: "https://api.nodepay.ai/api/auth/session",
+		PingURL:    "https://nw.nodepay.org/api/network/ping",
+		IPCheckURL: "https://api.ipify.org/?format=json",
 	}
 
 	tokens, err := readLines("token.txt")
